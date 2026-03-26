@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "nuclcommands",
+    "nucld", 
+    "nuclctl",
+    "nuclstart"
+]
+
+# optional but recommended
+resolver = "2"
