@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
-use nucld::errors::NuclErrors;
-use nucld::thread;
-use nucld::units::Unit;
+use nucllib::errors::NuclErrors;
+use nucllib::thread;
+use nucllib::units::Unit;
 use std::process;
 
 #[derive(Subcommand, Clone)]
@@ -19,6 +19,7 @@ struct Arg {
 }
 
 fn main() -> Result<(), NuclErrors> {
+    let _log_guard = nucllib::logging::init_logger("nuclstart");
     let args = Arg::parse().cmd;
     match args {
         Subcommands::SpawnFromJson { json } => {
@@ -61,7 +62,7 @@ pub fn spawn_monitor(unit: Unit) -> Result<u32, NuclErrors> {
     match handle.join() {
         Ok(_) => Ok(()),
         Err(e) => Err(NuclErrors::ThreadPanic(
-            nucld::errors::extract_panic_message(e),
+            nucllib::errors::extract_panic_message(e),
         )),
     }?;
     Ok(std::process::id())

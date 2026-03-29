@@ -1,34 +1,9 @@
-use crate::errors::NuclErrors;
-use crate::units::Unit;
-use nix::unistd;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, RwLock};
-
 pub mod autostart;
-pub mod errors;
 pub mod exec;
-pub mod log;
+pub mod prelude;
 pub mod units;
 
-pub static FIRST_RUN: RwLock<bool> = RwLock::new(true);
-
-pub static IS_ROOT: LazyLock<bool> = LazyLock::new(|| unistd::Uid::effective().is_root());
-
-static NUCLD_HELPER_BINARIES: LazyLock<HashMap<String, PathBuf>> = LazyLock::new(|| {
-    let mut map = HashMap::new();
-    println!("Hashmap creation started.");
-    const BINARIES: &[&str] = &["nucld", "nuclctl", "nuclstart"];
-    for bin in BINARIES {
-        if let Ok(path) = which::which(bin) {
-            map.insert(bin.to_string(), path);
-        }
-    }
-
-    println!("{map:?}");
-    map
-});
-
+use crate::prelude::*;
 pub fn get_path_of(name: &String) -> Result<PathBuf, NuclErrors> {
     if let Some(path) = NUCLD_HELPER_BINARIES.get(name) {
         println!("Found path: {}", path.display());
@@ -67,20 +42,10 @@ pub fn get_pid_of(name: &String) -> Result<u32, NuclErrors> {
     unsafe { Ok(*w.get(name).unwrap_unchecked()) }
 }
 
-//Faster evals.
-static UNITS: LazyLock<HashMap<String, Arc<Unit>>> = LazyLock::new(|| {
-    let vec = crate::units::read_and_eval_units().expect("Failed to eval units");
-    let mut hashmap = HashMap::new();
-    for unit in vec.into_iter() {
-        hashmap.insert(unit.get_name().clone(), Arc::new(unit));
-    }
-    hashmap
-});
-
-pub fn get_unit_from_name(name: &String) -> Option<Arc<Unit>> {
+pub fn get_unit_from_name(name: &String) -> Option<SharedUnit> {
     UNITS.get(name).cloned()
 }
 
-pub fn get_units() -> Vec<Arc<Unit>> {
+pub fn get_units() -> Vec<SharedUnit> {
     UNITS.values().cloned().collect()
 }

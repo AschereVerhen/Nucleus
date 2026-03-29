@@ -1,12 +1,14 @@
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Deserialize, Serialize)]
+#[serde(tag = "type", content = "data")]
 pub enum NuclErrors {
     #[error("The unit {name} is not running.")]
     UnitNotRunning { name: String },
     #[error("IO error: {0}")]
-    IO(#[from] std::io::Error),
+    IO(String),
     #[error("Thread Error: {0}")]
     ThreadPanic(String),
     #[error(
@@ -14,20 +16,50 @@ pub enum NuclErrors {
     )]
     NameMismatch { filename: String },
     #[error("Toml Parsing Error: {0}")]
-    TomlParsingError(#[from] toml::de::Error),
+    TomlParsingError(String),
     #[error("Json Parsing Error: {0}")]
-    JsonParsingError(#[from] serde_json::Error),
+    JsonParsingError(String),
     #[error("Unix Syscall failed: {0}")]
-    UnixSyscallFailure(#[from] nix::Error),
+    UnixSyscallFailure(String),
     #[error("The following binary was not found on the system: {name}")]
     BinaryNotFound { name: String },
     #[error("Failed to get a lock on a variable")]
     FailedToGetRwLock(String),
+    #[error("The unit: {name} is invalid.")]
+    UnitIsInvalid { name: String },
+    #[error("Unit \"{name}\" disappeared during stop operation")]
+    UnitNotFound { name: String },
+    #[error(
+        "Tried to use a root-only feature of the Init Manager, while it is not running as root."
+    )]
+    INITIsNotRoot,
 }
 
 impl<T> From<std::sync::PoisonError<T>> for NuclErrors {
     fn from(value: std::sync::PoisonError<T>) -> Self {
         NuclErrors::FailedToGetRwLock(value.to_string())
+    }
+}
+
+impl From<serde_json::Error> for NuclErrors {
+    fn from(value: serde_json::Error) -> Self {
+        NuclErrors::JsonParsingError(value.to_string())
+    }
+}
+impl From<nix::Error> for NuclErrors {
+    fn from(value: nix::Error) -> Self {
+        NuclErrors::UnixSyscallFailure(value.to_string())
+    }
+}
+impl From<toml::de::Error> for NuclErrors {
+    fn from(value: toml::de::Error) -> Self {
+        NuclErrors::TomlParsingError(value.to_string())
+    }
+}
+
+impl From<std::io::Error> for NuclErrors {
+    fn from(value: std::io::Error) -> Self {
+        NuclErrors::IO(value.to_string())
     }
 }
 
@@ -39,14 +71,4 @@ pub fn extract_panic_message(panic: Box<dyn Any + Send>) -> String {
     } else {
         "unknown panic".to_string()
     }
-}
-
-#[macro_export]
-macro_rules! thread {
-    ($func: expr $(, $name_for_thread: expr)? $(,)?) => {{
-        std::thread::Builder::new()
-            $(.name($name_for_thread))?
-            .spawn($func)
-            .map_err(|e| $crate::errors::NuclErrors::IO(e))
-    }}
 }
