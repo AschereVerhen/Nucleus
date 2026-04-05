@@ -14,3 +14,15 @@ pub fn set_autostart_for_unit(name: &String, autostart: bool) -> Result<(), Nucl
     }
     Ok(())
 }
+
+pub fn autostart_units() -> Result<(), NuclErrors> {
+    let units: Vec<SharedUnit> = UnitRegistry::get_all_units()?
+        .iter()
+        .cloned()
+        .filter(|f| f.lock().unwrap().get_autostart())
+        .collect();
+    for unit in units {
+        unit.lock()?.exec()?;
+    }
+    Ok(())
+}

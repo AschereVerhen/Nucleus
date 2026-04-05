@@ -1,3 +1,4 @@
-- Implement a better dependency chain 
-- Complete the CLI 
+- Implement a better dependency resolver 
+- Complete the CLI (Done) 
 - Complete logging
+- Fix the bug in command line args parsing where "Hello World" is parsed as ["Hello", "World"] after the --cmd

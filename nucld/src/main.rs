@@ -3,6 +3,7 @@ use nix::unistd::Pid;
 use nuclconsts::paths::SOCKET_PATH;
 use nuclconsts::units::UnitBuilder;
 use nucld::prelude::*;
+use nuclerrors::NuclResult;
 use nucllib::ipc::{IpcResponse, ResponseData};
 use std::io::Read;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -38,6 +39,12 @@ fn main() -> Result<(), NuclErrors> {
     } else {
         warn!("Daemon not running as root. Some process management features may fail.");
     }
+
+    //Start autostart
+    thread!(|| -> NuclResult<()> {
+        nucld::autostart::autostart_units()?;
+        Ok(())
+    })?;
 
     let listener = UnixListener::bind(&*SOCKET_PATH).map_err(|e| {
         error!(error = %e, "Failed to bind to Unix socket at {}", SOCKET_PATH.display());
@@ -211,8 +218,10 @@ fn execute_command(cmd: Commands) -> Result<ResponseData, NuclErrors> {
                 .restart(restart)
                 .dependencies(dependencies.unwrap_or(vec![]))
                 .autostart(autostart)
-                .build();
-            UnitFS::write_unit(unit_struct.shared(), user)?;
+                .build()
+                .shared();
+            UnitFS::write_unit(unit_struct.clone(), user)?;
+            UnitRegistry::add_unit(unit_struct)?;
             Ok(ResponseData::Empty)
         }
         Commands::RemoveUnit { name } => {
@@ -221,9 +230,24 @@ fn execute_command(cmd: Commands) -> Result<ResponseData, NuclErrors> {
             UnitRegistry::remove_unit(&name)?;
             Ok(ResponseData::Empty)
         }
-        _ => {
-            warn!("Command variant not yet implemented or unknown");
-            todo!();
+        Commands::Status { name } => {
+            info!(unit = %name, "Sending the status of a unit.");
+            let unit = UnitRegistry::get_unit(&name);
+            if unit.is_none() {
+                return Err(NuclErrors::UnitNotFound { name });
+            }
+            let unit = unit.unwrap();
+            Ok(ResponseData::UnitStatus {
+                running: RunningRegistry::is_running(unit)?,
+            })
+        }
+        Commands::Enable { name } => {
+            nucld::autostart::set_autostart_for_unit(&name, true)?;
+            Ok(ResponseData::Empty)
+        }
+        Commands::Disable { name } => {
+            nucld::autostart::set_autostart_for_unit(&name, false)?;
+            Ok(ResponseData::Empty)
         }
     }
 }
