@@ -4,7 +4,7 @@ members = [
     "nucld", 
     "nuclctl",
     "nuclstart"
-, "logging", "nuclconsts"]
+, "logging", "nuclconsts", "nuclerrors"]
 
 # optional but recommended
 resolver = "2"

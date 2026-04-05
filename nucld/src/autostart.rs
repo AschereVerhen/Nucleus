@@ -3,7 +3,7 @@
 use crate::prelude::*;
 
 pub fn set_autostart_for_unit(name: &String, autostart: bool) -> Result<(), NuclErrors> {
-    let unit = get_unit_from_name(name);
+    let unit = UnitRegistry::get_unit(name);
     if unit.is_none() {
         Err(NuclErrors::UnitIsInvalid { name: name.clone() })?;
     }

@@ -1,12 +1,12 @@
 use nix::sys::signal::SIGKILL;
 use nix::unistd::Pid;
+use nuclconsts::paths::SOCKET_PATH;
+use nuclconsts::units::UnitBuilder;
 use nucld::prelude::*;
 use nucllib::ipc::{IpcResponse, ResponseData};
 use std::io::Read;
 use std::os::unix::net::{UnixListener, UnixStream};
 use tracing::{Span, debug, error, info, instrument, trace, warn};
-
-const SOCKET_PATH: &str = "/tmp/nucld.sock";
 
 fn main() -> Result<(), NuclErrors> {
     // Initialize the logger we built in the previous step
@@ -14,12 +14,20 @@ fn main() -> Result<(), NuclErrors> {
 
     info!("Initializing nucld daemon");
 
-    if std::fs::metadata(SOCKET_PATH).is_ok() {
-        trace!("Cleaning up existing domain socket at {}", SOCKET_PATH);
-        let _ = std::fs::remove_file(SOCKET_PATH);
+    if SOCKET_PATH.exists() {
+        trace!(
+            "Cleaning up existing domain socket at {}",
+            &SOCKET_PATH.display()
+        );
+        let _ = std::fs::remove_file(&*SOCKET_PATH);
     }
 
-    if *IS_ROOT {
+    if let Some(parent) = SOCKET_PATH.parent()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent)?
+    }
+    if is_root() {
         debug!("Running as root: spawning zombie reaper thread");
         thread!(|| {
             loop {
@@ -31,12 +39,12 @@ fn main() -> Result<(), NuclErrors> {
         warn!("Daemon not running as root. Some process management features may fail.");
     }
 
-    let listener = UnixListener::bind(SOCKET_PATH).map_err(|e| {
-        error!(error = %e, "Failed to bind to Unix socket at {}", SOCKET_PATH);
+    let listener = UnixListener::bind(&*SOCKET_PATH).map_err(|e| {
+        error!(error = %e, "Failed to bind to Unix socket at {}", SOCKET_PATH.display());
         e
     })?;
 
-    info!(path = %SOCKET_PATH, "nucld listening for commands");
+    info!(path = %SOCKET_PATH.display(), "nucld listening for commands");
 
     for stream in listener.incoming() {
         match stream {
@@ -116,37 +124,45 @@ fn execute_command(cmd: Commands) -> Result<ResponseData, NuclErrors> {
             span.record("unit", name.as_str());
 
             info!(unit = %name, "Received Start command");
-            let unit = nucld::get_unit_from_name(&name);
-            if let Some(u) = unit {
+            let unit = UnitRegistry::get_unit(&name);
+            let thread;
+            if let Some(u) = unit.clone() {
                 debug!(unit = %name, "Unit found, spawning execution thread");
-                thread!(move || -> Result<(), NuclErrors> {
+                thread = thread!(move || -> Result<(), NuclErrors> {
                     let guard = u.lock().inspect_err(|_| {
                         error!("Failed to lock unit mutex");
                     })?;
-                    info!(unit = %name, "Executing unit process");
-                    guard.exec()
+                    info!(unit = %guard.get_name(), "Executing unit process");
+                    guard.exec()?;
+                    Ok(())
                 })?;
             } else {
                 warn!(unit = %name, "Start failed: Unit not found");
+                return Err(NuclErrors::UnitNotFound { name });
+            };
+            let unit = unit.unwrap();
+            let _ = thread.join();
+            let pid = RunningRegistry::get_pid_of(unit);
+            if pid.is_none() {
+                panic!("An undefined behaviour has occured.");
             }
-            Ok(ResponseData::Empty)
+            let pid = pid.unwrap();
+            Ok(ResponseData::UnitStarted { pid })
         }
 
         Commands::Stop { name } => {
             info!(unit = %name, "Received Stop command");
-            let res = nucld::get_pid_of(&name);
+            let unit = RunningRegistry::get_unit(&name);
+            if unit.is_none() {
+                return Err(NuclErrors::UnitNotRunning { name });
+            }
+            let unit = unit.unwrap();
+            let res = RunningRegistry::get_pid_of(unit.clone());
 
             match res {
-                Ok(pid_val) => {
+                Some(pid_val) => {
                     let pid = Pid::from_raw(pid_val as i32);
-                    let unit_lock = get_unit_from_name(&name);
-                    let unit_lock = unit_lock.ok_or_else(|| {
-                        error!("Unit disappeared during stop operation");
-                        NuclErrors::UnitNotFound { name: name.clone() }
-                    })?;
-                    let unit_lock = unit_lock.lock()?;
-
-                    let restart = unit_lock.get_restart();
+                    let restart = unit.lock()?.get_restart();
 
                     if restart {
                         info!(pid = ?pid, "Sending SIGKILL to process group (restart enabled)");
@@ -156,14 +172,14 @@ fn execute_command(cmd: Commands) -> Result<ResponseData, NuclErrors> {
                         nix::sys::signal::kill(pid, SIGKILL)?;
                     }
                 }
-                Err(e) => warn!(unit = %name, error = ?e, "Stop failed: PID not found for unit"),
+                None => warn!(unit = %name, "Stop failed: PID not found for unit"),
             }
-            Ok(ResponseData::Empty)
+            Ok(ResponseData::UnitStopped)
         }
 
         Commands::ListUnits => {
             debug!("Generating unit status table");
-            let units = nucld::get_units();
+            let units = UnitRegistry::get_all_units()?;
             let mut cloned_unit = Vec::new();
 
             //Need this to convert Vec<Arc<Mutex<Unit>>> -> Vec<Unit>
@@ -187,12 +203,24 @@ fn execute_command(cmd: Commands) -> Result<ResponseData, NuclErrors> {
             dependencies,
             user,
         } => {
-            info!(unit = %name, command = ?cmd, "Adding new unit to system");
+            info!(unit = %name, command = ?cmd, "Adding new unit to database");
             // Values passed to the helper function
-            nucllib::units::write_unit(name, cmd, restart, autostart, dependencies, user)?;
+            let unit_struct = UnitBuilder::new()
+                .name(name.clone())
+                .cmd(cmd)
+                .restart(restart)
+                .dependencies(dependencies.unwrap_or(vec![]))
+                .autostart(autostart)
+                .build();
+            UnitFS::write_unit(unit_struct.shared(), user)?;
             Ok(ResponseData::Empty)
         }
-
+        Commands::RemoveUnit { name } => {
+            info!(unit = %name, "Removing a unit from system");
+            UnitFS::remove_unit(name.clone())?;
+            UnitRegistry::remove_unit(&name)?;
+            Ok(ResponseData::Empty)
+        }
         _ => {
             warn!("Command variant not yet implemented or unknown");
             todo!();

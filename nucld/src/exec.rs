@@ -2,17 +2,18 @@ use crate::prelude::*;
 use std::os::unix::process::CommandExt;
 
 pub trait Exec {
-    fn exec(&self) -> Result<(), NuclErrors>;
+    fn exec(&self) -> Result<u32, NuclErrors>;
 }
 
-pub fn exec(unit: Unit) -> Result<u32, NuclErrors> {
+pub fn exec(unit: SharedUnit) -> Result<u32, NuclErrors> {
     println!("exec at was called.");
-    let monitor = unit.get_restart();
+    let monitor = unit.lock()?.get_restart();
     let pid = if monitor {
-        spawn_monitor(unit)?
+        spawn_monitor(unit.clone())?
     } else {
-        exec_process(unit)?
+        exec_process(unit.clone())?
     };
+    RunningRegistry::add_unit(unit, pid)?;
     Ok(pid)
 }
 fn exec_program(arguments: &[String]) -> Result<process::Child, NuclErrors> {
@@ -23,12 +24,12 @@ fn exec_program(arguments: &[String]) -> Result<process::Child, NuclErrors> {
 }
 use tracing::{debug, error, info, instrument, trace};
 
-#[instrument(skip(unit), fields(unit_name = %unit.get_name()), level = "debug")]
-fn exec_process(unit: Unit) -> Result<u32, NuclErrors> {
+#[instrument(skip(unit), fields(unit_name = %unit.lock()?.get_name()), level = "debug")]
+fn exec_process(unit: SharedUnit) -> Result<u32, NuclErrors> {
     info!("Attempting to execute unit process");
 
-    let arguments = unit.get_cmd().to_vec();
-    let name = unit.get_name().clone();
+    let arguments = unit.lock()?.get_cmd().to_vec();
+    let name = unit.lock()?.get_name().clone();
 
     trace!(?arguments, "Extracted unit execution arguments");
 
@@ -40,7 +41,7 @@ fn exec_process(unit: Unit) -> Result<u32, NuclErrors> {
 
         {
             trace!("Marking unit as running in ALREADY_RUNNING map");
-            mark_name_as_running(name.clone(), child.id())?;
+            RunningRegistry::add_unit(Arc::clone(&unit), child.id())?;
         }
 
         // Waiter thread
@@ -52,7 +53,7 @@ fn exec_process(unit: Unit) -> Result<u32, NuclErrors> {
             }
 
             trace!(unit_name = %name, "Unmarking unit from ALREADY_RUNNING");
-            unmark_name_as_running(&name)?;
+            RunningRegistry::remove_unit(unit)?;
             Ok(())
         })?;
 
@@ -71,9 +72,10 @@ fn exec_process(unit: Unit) -> Result<u32, NuclErrors> {
         }
     }
 }
-fn spawn_monitor(unit: Unit) -> Result<u32, NuclErrors> {
+fn spawn_monitor(unit: SharedUnit) -> Result<u32, NuclErrors> {
     let path_to_nuclstart = get_path_of(&"nuclstart".to_string())?;
-    let serialized = serde_json::to_string(&unit)?;
+    let unit_cloned = Arc::clone(&unit);
+    let serialized = serde_json::to_string(unit_cloned.as_ref())?;
     println!("{}", &serialized);
     let mut child = unsafe {
         process::Command::new(path_to_nuclstart)
@@ -87,12 +89,11 @@ fn spawn_monitor(unit: Unit) -> Result<u32, NuclErrors> {
             .spawn()?
     };
     let id = child.id();
-    mark_name_as_running(unit.get_name().clone(), id)?;
-
+    RunningRegistry::add_unit(unit.clone(), id)?;
     thread!(move || -> Result<(), NuclErrors> {
         let _ = child.wait();
         println!("Child died");
-        unmark_name_as_running(unit.get_name())?;
+        RunningRegistry::remove_unit(unit)?;
         Ok(())
     })?;
 

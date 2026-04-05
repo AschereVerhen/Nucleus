@@ -4,6 +4,6 @@ macro_rules! thread {
         std::thread::Builder::new()
             $(.name($name_for_thread))?
             .spawn($func)
-            .map_err(|e| $crate::errors::NuclErrors::IO(e.to_string()))
+            .map_err(|e| nuclerrors::NuclErrors::IO(e.to_string()))
     }}
 }

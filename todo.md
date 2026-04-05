@@ -1,0 +1,3 @@
+- Implement a better dependency chain 
+- Complete the CLI 
+- Complete logging

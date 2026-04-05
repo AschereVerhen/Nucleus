@@ -1,12 +1,23 @@
 use nix::unistd;
-use std::collections::HashMap;
+use nuclerrors::NuclResult;
 use std::sync::{LazyLock, RwLock};
 
 pub mod paths;
+pub mod units;
+mod units_parsing;
 
-pub static FIRST_RUN: RwLock<bool> = RwLock::new(true);
+static FIRST_RUN: RwLock<bool> = RwLock::new(true);
+pub fn is_first_run() -> NuclResult<bool> {
+    Ok(*FIRST_RUN.read()?)
+}
+pub fn set_first_run(val: bool) -> NuclResult<()> {
+    let mut guard = FIRST_RUN.write()?;
+    *guard = val;
+    Ok(())
+}
 
-pub static IS_ROOT: LazyLock<bool> = LazyLock::new(|| unistd::Uid::effective().is_root());
+static IS_ROOT: LazyLock<bool> = LazyLock::new(|| unistd::Uid::effective().is_root());
 
-pub static ALREADY_RUNNING: LazyLock<RwLock<HashMap<String, u32>>> =
-    LazyLock::new(|| RwLock::new(HashMap::new()));
+pub fn is_root() -> bool {
+    *IS_ROOT
+}

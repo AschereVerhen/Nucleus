@@ -10,6 +10,7 @@ libc = "0.2.182"
 logging = { version = "0.1.0", path = "../logging" }
 nix = { version = "0.31.2", features = ["user", "process", "signal"] }
 nuclconsts = { version = "0.1.0", path = "../nuclconsts" }
+nuclerrors = { version = "0.1.0", path = "../nuclerrors" }
 nucllib = { version = "0.1.0", path = "../nucllib" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"

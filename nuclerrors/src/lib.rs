@@ -41,6 +41,12 @@ impl<T> From<std::sync::PoisonError<T>> for NuclErrors {
     }
 }
 
+impl From<walkdir::Error> for NuclErrors {
+    fn from(value: walkdir::Error) -> Self {
+        NuclErrors::IO(value.to_string())
+    }
+}
+
 impl From<serde_json::Error> for NuclErrors {
     fn from(value: serde_json::Error) -> Self {
         NuclErrors::JsonParsingError(value.to_string())
@@ -49,6 +55,11 @@ impl From<serde_json::Error> for NuclErrors {
 impl From<nix::Error> for NuclErrors {
     fn from(value: nix::Error) -> Self {
         NuclErrors::UnixSyscallFailure(value.to_string())
+    }
+}
+impl From<toml::ser::Error> for NuclErrors {
+    fn from(value: toml::ser::Error) -> Self {
+        NuclErrors::TomlParsingError(value.to_string())
     }
 }
 impl From<toml::de::Error> for NuclErrors {
@@ -72,3 +83,5 @@ pub fn extract_panic_message(panic: Box<dyn Any + Send>) -> String {
         "unknown panic".to_string()
     }
 }
+
+pub type NuclResult<T> = Result<T, NuclErrors>;

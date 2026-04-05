@@ -7,8 +7,8 @@ pub use nix::unistd::Uid;
 pub use nuclconsts::paths::*;
 pub use nuclconsts::*;
 
-pub use nucllib::errors::{NuclErrors, extract_panic_message};
-pub use nucllib::{commands::Commands, units::*};
+pub use nuclerrors::{NuclErrors, extract_panic_message};
+pub use nucllib::commands::Commands;
 
 // Macro export (FIXES your `thread!` error)
 pub use nucllib::thread;
@@ -24,10 +24,9 @@ pub use std::fs::DirEntry;
 pub use walkdir::WalkDir;
 
 // ===== Crate items =====
-pub use crate::{
-    exec::Exec, get_path_of, get_unit_from_name, mark_name_as_running, query_if_name_is_running,
-    unmark_name_as_running,
-};
+pub use crate::{exec::Exec, get_path_of};
+
+pub use nuclconsts::units::{RunningRegistry, SharedUnit, Unit, UnitFS, UnitRegistry};
 
 // ===== Traits =====
 pub use serde::{Deserialize, Serialize};

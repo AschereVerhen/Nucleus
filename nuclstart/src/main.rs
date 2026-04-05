@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
-use nucllib::errors::NuclErrors;
+use nuclconsts::units::Unit;
+use nuclerrors::NuclErrors;
 use nucllib::thread;
-use nucllib::units::Unit;
 use std::process;
 
 #[derive(Subcommand, Clone)]
@@ -61,9 +61,9 @@ pub fn spawn_monitor(unit: Unit) -> Result<u32, NuclErrors> {
     })?;
     match handle.join() {
         Ok(_) => Ok(()),
-        Err(e) => Err(NuclErrors::ThreadPanic(
-            nucllib::errors::extract_panic_message(e),
-        )),
+        Err(e) => Err(NuclErrors::ThreadPanic(nuclerrors::extract_panic_message(
+            e,
+        ))),
     }?;
     Ok(std::process::id())
 }
