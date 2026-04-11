@@ -1,7 +1,7 @@
 use clap::Parser;
 use nuclconsts::paths::SOCKET_PATH;
 use nuclconsts::units::Unit;
-use nuclerrors::NuclErrors;
+use nuclerrors::NuclResult;
 use nucllib::commands::Commands;
 use nucllib::ipc::{IpcResponse, ResponseData};
 use std::io::{Read, Write};
@@ -15,7 +15,7 @@ pub struct Cmd {
     cmd: Commands,
 }
 
-fn main() -> Result<(), NuclErrors> {
+fn main() -> NuclResult<()> {
     // let _log_guard = nucllib::logging::init_logger("nuclctl");
     let s = Cmd::parse();
     let mut stream = UnixStream::connect(&*SOCKET_PATH)?;

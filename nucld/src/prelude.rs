@@ -7,7 +7,7 @@ pub use nix::unistd::Uid;
 pub use nuclconsts::paths::*;
 pub use nuclconsts::*;
 
-pub use nuclerrors::{NuclErrors, extract_panic_message};
+pub use nuclerrors::{NuclErrors, NuclResult, extract_panic_message};
 pub use nucllib::commands::Commands;
 
 // Macro export (FIXES your `thread!` error)

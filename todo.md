@@ -2,3 +2,5 @@
 - Complete the CLI (Done) 
 - Complete logging
 - Fix the bug in command line args parsing where "Hello World" is parsed as ["Hello", "World"] after the --cmd
+- Fix the bug where "nuclctl enable/disable" doesnt write to the unit file and just alters the unit in-place in the Registry.
+- eyre error messages

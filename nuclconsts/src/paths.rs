@@ -4,7 +4,6 @@ use std::sync::LazyLock;
 
 pub static NUCLD_HELPER_BINARIES: LazyLock<HashMap<String, PathBuf>> = LazyLock::new(|| {
     let mut map = HashMap::new();
-    println!("Hashmap creation started.");
     const BINARIES: &[&str] = &["nucld", "nuclctl", "nuclstart"];
     for bin in BINARIES {
         if let Ok(path) = which::which(bin) {
@@ -12,7 +11,6 @@ pub static NUCLD_HELPER_BINARIES: LazyLock<HashMap<String, PathBuf>> = LazyLock:
         }
     }
 
-    println!("{map:?}");
     map
 });
 

@@ -37,8 +37,8 @@ pub enum Commands {
         autostart: bool,
         #[arg(long, short, value_delimiter = ',')]
         dependencies: Option<Vec<String>>,
-        #[arg(long, short, default_value_t = false)]
-        user: bool
+        #[arg(long, default_value_t = String::from("root"))]
+        runas: String
     },
     RemoveUnit {
         name: String,

@@ -1,20 +1,59 @@
-use nix::sys::signal::SIGKILL;
-use nix::unistd::Pid;
+use fs2::FileExt;
+use nix::unistd::{ForkResult, Pid};
 use nuclconsts::paths::SOCKET_PATH;
-use nuclconsts::units::UnitBuilder;
+use nucld::parse_input::execute_command;
 use nucld::prelude::*;
 use nuclerrors::NuclResult;
-use nucllib::ipc::{IpcResponse, ResponseData};
+use nucllib::ipc::IpcResponse;
 use std::io::Read;
 use std::os::unix::net::{UnixListener, UnixStream};
-use tracing::{Span, debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
-fn main() -> Result<(), NuclErrors> {
-    // Initialize the logger we built in the previous step
+fn daemonize() -> NuclResult<u32> {
+    let fork_res = unsafe { nix::unistd::fork()? };
+    match fork_res {
+        ForkResult::Child => {
+            nix::unistd::setsid()?;
+            Ok(0u32)
+        }
+        ForkResult::Parent { child } => {
+            let pid_child = child.as_raw();
+            Ok(pid_child as u32)
+        }
+    }
+}
+
+fn main() -> NuclResult<()> {
+    if !is_root() {
+        panic!("Run the init manager as root.");
+    }
+    let _lock_file = PathBuf::from("/tmp/nuclinit/nucld.lock");
+    if !_lock_file.parent().unwrap().exists() {
+        std::fs::create_dir_all(_lock_file.parent().unwrap())?;
+    }
+    let _file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(_lock_file)?;
+    match _file.try_lock_exclusive() {
+        Ok(()) => (),
+        Err(_) => {
+            //this means that another instance of nucld is already running. hence we will return
+            //from the main function.
+            return Ok(());
+        }
+    }
+
+    // let res = daemonize()?;
+    // if res != 0 {
+    //     info!(pid=%res, "Daemonized nucld with "); //pid = pid ofc
+    //     return Ok(()); //kill the parent thread;
+    // }
+
     let _log_guard = nucllib::logging::init_logger("nucld");
-
     info!("Initializing nucld daemon");
-
     if SOCKET_PATH.exists() {
         trace!(
             "Cleaning up existing domain socket at {}",
@@ -28,6 +67,7 @@ fn main() -> Result<(), NuclErrors> {
     {
         std::fs::create_dir_all(parent)?
     }
+
     if is_root() {
         debug!("Running as root: spawning zombie reaper thread");
         thread!(|| {
@@ -90,7 +130,7 @@ fn reap_children() {
 }
 
 #[instrument(skip(stream), level = "info")]
-fn handle_client(mut stream: UnixStream) -> Result<(), NuclErrors> {
+fn handle_client(mut stream: UnixStream) -> NuclResult<()> {
     let mut buffer = [0; 1024];
     trace!("Reading data from client stream");
 
@@ -121,133 +161,4 @@ fn handle_client(mut stream: UnixStream) -> Result<(), NuclErrors> {
     let serialized = serde_json::to_string(&response)?;
     stream.write_all(serialized.as_bytes())?;
     Ok(())
-}
-
-// #[instrument(level = "info", skip_all, fields(command = ?cmd))]
-fn execute_command(cmd: Commands) -> Result<ResponseData, NuclErrors> {
-    match cmd {
-        Commands::Start { name } => {
-            let span = Span::current();
-            span.record("unit", name.as_str());
-
-            info!(unit = %name, "Received Start command");
-            let unit = UnitRegistry::get_unit(&name);
-            let thread;
-            if let Some(u) = unit.clone() {
-                debug!(unit = %name, "Unit found, spawning execution thread");
-                thread = thread!(move || -> Result<(), NuclErrors> {
-                    let guard = u.lock().inspect_err(|_| {
-                        error!("Failed to lock unit mutex");
-                    })?;
-                    info!(unit = %guard.get_name(), "Executing unit process");
-                    guard.exec()?;
-                    Ok(())
-                })?;
-            } else {
-                warn!(unit = %name, "Start failed: Unit not found");
-                return Err(NuclErrors::UnitNotFound { name });
-            };
-            let unit = unit.unwrap();
-            let _ = thread.join();
-            let pid = RunningRegistry::get_pid_of(unit);
-            if pid.is_none() {
-                panic!("An undefined behaviour has occured.");
-            }
-            let pid = pid.unwrap();
-            Ok(ResponseData::UnitStarted { pid })
-        }
-
-        Commands::Stop { name } => {
-            info!(unit = %name, "Received Stop command");
-            let unit = RunningRegistry::get_unit(&name);
-            if unit.is_none() {
-                return Err(NuclErrors::UnitNotRunning { name });
-            }
-            let unit = unit.unwrap();
-            let res = RunningRegistry::get_pid_of(unit.clone());
-
-            match res {
-                Some(pid_val) => {
-                    let pid = Pid::from_raw(pid_val as i32);
-                    let restart = unit.lock()?.get_restart();
-
-                    if restart {
-                        info!(pid = ?pid, "Sending SIGKILL to process group (restart enabled)");
-                        nix::sys::signal::killpg(pid, SIGKILL)?;
-                    } else {
-                        info!(pid = ?pid, "Sending SIGKILL to specific process");
-                        nix::sys::signal::kill(pid, SIGKILL)?;
-                    }
-                }
-                None => warn!(unit = %name, "Stop failed: PID not found for unit"),
-            }
-            Ok(ResponseData::UnitStopped)
-        }
-
-        Commands::ListUnits => {
-            debug!("Generating unit status table");
-            let units = UnitRegistry::get_all_units()?;
-            let mut cloned_unit = Vec::new();
-
-            //Need this to convert Vec<Arc<Mutex<Unit>>> -> Vec<Unit>
-            for unit in units {
-                {
-                    let guard = unit.lock()?;
-                    cloned_unit.push(guard.clone());
-                }
-            }
-
-            let serialized = serde_json::to_string(&cloned_unit)?;
-            trace!(table = %serialized, "Units json generated");
-            Ok(ResponseData::JsonResponse(serialized))
-        }
-
-        Commands::AddUnit {
-            name,
-            cmd,
-            restart,
-            autostart,
-            dependencies,
-            user,
-        } => {
-            info!(unit = %name, command = ?cmd, "Adding new unit to database");
-            // Values passed to the helper function
-            let unit_struct = UnitBuilder::new()
-                .name(name.clone())
-                .cmd(cmd)
-                .restart(restart)
-                .dependencies(dependencies.unwrap_or(vec![]))
-                .autostart(autostart)
-                .build()
-                .shared();
-            UnitFS::write_unit(unit_struct.clone(), user)?;
-            UnitRegistry::add_unit(unit_struct)?;
-            Ok(ResponseData::Empty)
-        }
-        Commands::RemoveUnit { name } => {
-            info!(unit = %name, "Removing a unit from system");
-            UnitFS::remove_unit(name.clone())?;
-            UnitRegistry::remove_unit(&name)?;
-            Ok(ResponseData::Empty)
-        }
-        Commands::Status { name } => {
-            info!(unit = %name, "Sending the status of a unit.");
-            let unit = UnitRegistry::get_unit(&name);
-            if unit.is_none() {
-                return Err(NuclErrors::UnitNotFound { name });
-            }
-            let unit = unit.unwrap();
-            Ok(ResponseData::UnitStatus {
-                running: RunningRegistry::is_running(unit)?,
-            })
-        }
-        Commands::Enable { name } => {
-            nucld::autostart::set_autostart_for_unit(&name, true)?;
-            Ok(ResponseData::Empty)
-        }
-        Commands::Disable { name } => {
-            nucld::autostart::set_autostart_for_unit(&name, false)?;
-            Ok(ResponseData::Empty)
-        }
-    }
 }

@@ -27,8 +27,8 @@ pub enum NuclErrors {
     FailedToGetRwLock(String),
     #[error("The unit: {name} is invalid.")]
     UnitIsInvalid { name: String },
-    #[error("Unit \"{name}\" disappeared during stop operation")]
-    UnitNotFound { name: String },
+    #[error("User \"{name}\" does not exist")]
+    UserNotFound { name: String },
     #[error(
         "Tried to use a root-only feature of the Init Manager, while it is not running as root."
     )]
@@ -37,6 +37,12 @@ pub enum NuclErrors {
 
 impl<T> From<std::sync::PoisonError<T>> for NuclErrors {
     fn from(value: std::sync::PoisonError<T>) -> Self {
+        NuclErrors::FailedToGetRwLock(value.to_string())
+    }
+}
+
+impl<T> From<std::sync::TryLockError<T>> for NuclErrors {
+    fn from(value: std::sync::TryLockError<T>) -> Self {
         NuclErrors::FailedToGetRwLock(value.to_string())
     }
 }

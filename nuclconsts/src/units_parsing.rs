@@ -1,4 +1,3 @@
-use crate::is_root;
 use crate::units::Unit;
 use nuclerrors::NuclErrors;
 use nuclerrors::NuclResult;
@@ -13,19 +12,13 @@ fn get_units() -> Vec<DirEntry> {
         .filter_map(|e| e.ok())
         .collect();
 
-    let res = if is_root() {
-        units_user.extend(
-            WalkDir::new(&dirs.system_dir)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .collect::<Vec<DirEntry>>(),
-        );
-        units_user
-    } else {
-        units_user
-    };
-    println!("Res is: {res:?}");
-    res
+    units_user.extend(
+        WalkDir::new(&dirs.system_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .collect::<Vec<DirEntry>>(),
+    );
+    units_user
 }
 
 pub fn read_and_eval_units() -> NuclResult<Vec<Unit>> {
@@ -36,7 +29,6 @@ pub fn read_and_eval_units() -> NuclResult<Vec<Unit>> {
             if unit.path().is_dir() {
                 continue;
             }
-
             let contents = std::fs::read_to_string(unit.path())?;
             let unitstruct: Unit = toml::from_str(&contents).unwrap();
             let filename_raw = unit.file_name().as_encoded_bytes();

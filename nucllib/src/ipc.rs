@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use nuclerrors::NuclErrors;
+use nuclerrors::{NuclErrors, NuclResult};
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
@@ -24,13 +24,13 @@ pub enum IpcResponse {
 }
 
 impl IpcResponse {
-    pub fn to_res(self) -> Result<ResponseData, NuclErrors> {
+    pub fn to_res(self) -> NuclResult<ResponseData> {
         match self {
             IpcResponse::Ok(v) => Ok(v),
             IpcResponse::Err(e) => Err(e),
         }
     }
-    pub fn from_res(val: Result<ResponseData, NuclErrors>) -> Self {
+    pub fn from_res(val: NuclResult<ResponseData>) -> Self {
         match val {
             Ok(r) => IpcResponse::Ok(r),
             Err(e) => IpcResponse::Err(e),

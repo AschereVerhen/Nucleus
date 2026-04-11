@@ -1,6 +1,5 @@
-use crate::IS_ROOT;
-use crate::is_root;
 use crate::units_parsing::read_and_eval_units;
+use nix::unistd::Uid;
 use nuclerrors::NuclErrors;
 use nuclerrors::NuclResult;
 use serde::{Deserialize, Serialize};
@@ -18,6 +17,7 @@ pub struct UnitBuilder {
     restart: bool,
     dependencies: Vec<String>,
     autostart: bool,
+    runas: Option<u32>,
 }
 
 impl UnitBuilder {
@@ -46,6 +46,11 @@ impl UnitBuilder {
         self
     }
 
+    pub fn runas(mut self, runas: u32) -> Self {
+        self.runas = Some(runas);
+        self
+    }
+
     pub fn build(self) -> Unit {
         Unit {
             name: self.name.ok_or("Name must be present").unwrap(),
@@ -53,6 +58,7 @@ impl UnitBuilder {
             restart: self.restart,
             autostart: self.autostart,
             dependencies: Some(self.dependencies),
+            runas: self.runas.unwrap_or(0u32),
         }
     }
 }
@@ -64,8 +70,12 @@ fn format_cmd(v: &[String]) -> String {
 fn format_optional_vec(opt: &Option<Vec<String>>) -> String {
     match opt {
         Some(v) if !v.is_empty() => v.join(", "),
-        _ => "none".to_string(),
+        _ => "None".to_string(),
     }
+}
+
+fn default_value_runas() -> u32 {
+    0u32
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Tabled, Default, Hash, PartialEq, Eq)]
@@ -79,6 +89,8 @@ pub struct Unit {
     autostart: bool,
     #[tabled(display = "format_optional_vec")]
     dependencies: Option<Vec<String>>, //File names.
+    #[serde(default = "default_value_runas")]
+    runas: u32, //Pid
 }
 
 impl Unit {
@@ -97,6 +109,10 @@ impl Unit {
     pub fn get_autostart(&self) -> bool {
         self.autostart
     }
+    pub fn get_runas(&self) -> u32 {
+        self.runas
+    }
+
     pub fn set_name(&mut self, name: String) {
         self.name = name;
     }
@@ -125,55 +141,66 @@ impl Unit {
 pub struct UnitFS;
 
 impl UnitFS {
-    pub fn write_unit(unit_struct: SharedUnit, user_defined: bool) -> Result<(), NuclErrors> {
+    pub fn write_unit(unit_struct: SharedUnit) -> NuclResult<()> {
         let dirs = &*crate::paths::DIRUNIT;
+        let user = unit_struct.lock()?.get_runas();
+        let user = nix::unistd::User::from_uid(Uid::from(user))?.unwrap(); //Note: if the unit_struct
+        //exists, that means the conversion from "String" -> u32 has already been done AND user is
+        //sure to exist. So unwrapping() here is safe.
+        let e = user.dir.join(".local/share/nuclinit/units");
 
-        let dir = if user_defined {
-            &dirs.user_dir
-        } else {
-            if !*IS_ROOT {
-                return Err(NuclErrors::INITIsNotRoot);
+        let dir = if user.uid != Uid::from(0) {
+            if !e.exists() {
+                std::fs::create_dir_all(&e)?;
             }
-
-            &dirs.system_dir
+            e.as_path()
+        } else {
+            dirs.system_dir.as_path()
         };
-        let unit_guard = unit_struct.lock()?;
 
-        let new_unit_file = dir.join(format!("{}.toml", unit_guard.get_name()));
+        let new_unit_file = { dir.join(format!("{}.toml", unit_struct.lock()?.get_name())) };
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(new_unit_file)?;
-        let serialized = toml::to_string_pretty(&*unit_guard)?;
+        let serialized = { toml::to_string_pretty(&*unit_struct.lock()?) }?; //drop the lock
+        //asap.
         writeln!(&mut file, "{serialized}")?;
         Ok(())
     }
 
-    pub fn remove_unit(unit_name: String) -> Result<(), NuclErrors> {
-        println!("Remove_Unit called");
+    pub fn remove_unit(unit_name: String) -> NuclResult<()> {
         let dirs = &*crate::paths::DIRUNIT;
-        let target_name = std::ffi::OsString::from(format!("{}.toml", unit_name));
-        let mut removed: bool = false;
-        for entry in WalkDir::new(dirs.user_dir.as_path()) {
-            let entry = entry?;
-            if entry.file_name() == target_name {
-                std::fs::remove_file(entry.path())?;
-                removed = true;
-            }
-        }
-        if is_root() {
-            for entry in WalkDir::new(dirs.system_dir.as_path()) {
-                let entry = entry?;
-                if entry.file_name() == target_name {
-                    std::fs::remove_file(entry.path())?;
-                    removed = true;
-                }
-            }
+        let unit = UnitRegistry::get_unit(&unit_name);
+
+        if unit.is_none() {
+            return Err(NuclErrors::UnitIsInvalid { name: unit_name });
         }
 
-        if !removed {
-            return Err(NuclErrors::UnitNotFound { name: unit_name });
+        let unit = unit.unwrap();
+
+        let user = unit.lock()?.get_runas();
+        let user = nix::unistd::User::from_uid(Uid::from(user))?.unwrap(); //Safe because unit
+        //exists. and the extended reasoning is written above
+        let e = user.dir.join(".local/share/nuclinit/units");
+
+        let dir = if user.uid != Uid::from(0) {
+            if !e.exists() {
+                std::fs::create_dir_all(&e)?;
+            }
+            e.as_path()
+        } else {
+            dirs.system_dir.as_path()
+        };
+
+        let target_name = std::ffi::OsString::from(format!("{}.toml", unit_name));
+
+        for e in WalkDir::new(dir) {
+            let e = e?;
+            if e.file_name() == target_name {
+                std::fs::remove_file(e.path())?
+            }
         }
 
         Ok(())

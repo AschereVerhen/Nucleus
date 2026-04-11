@@ -2,7 +2,7 @@
 //
 use crate::prelude::*;
 
-pub fn set_autostart_for_unit(name: &String, autostart: bool) -> Result<(), NuclErrors> {
+pub fn set_autostart_for_unit(name: &String, autostart: bool) -> NuclResult<()> {
     let unit = UnitRegistry::get_unit(name);
     if unit.is_none() {
         Err(NuclErrors::UnitIsInvalid { name: name.clone() })?;
@@ -15,14 +15,14 @@ pub fn set_autostart_for_unit(name: &String, autostart: bool) -> Result<(), Nucl
     Ok(())
 }
 
-pub fn autostart_units() -> Result<(), NuclErrors> {
+pub fn autostart_units() -> NuclResult<()> {
     let units: Vec<SharedUnit> = UnitRegistry::get_all_units()?
         .iter()
         .cloned()
         .filter(|f| f.lock().unwrap().get_autostart())
         .collect();
     for unit in units {
-        unit.lock()?.exec()?;
+        unit.exec()?;
     }
     Ok(())
 }

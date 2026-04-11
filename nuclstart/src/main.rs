@@ -1,8 +1,10 @@
 use clap::{Parser, Subcommand};
 use nuclconsts::units::Unit;
+use nucld::prelude::*;
 use nuclerrors::NuclErrors;
 use nucllib::thread;
-use std::process;
+use std::{os::unix::process::CommandExt, process};
+use tracing::{debug, error, info, instrument, trace};
 
 #[derive(Subcommand, Clone)]
 enum Subcommands {
@@ -18,30 +20,38 @@ struct Arg {
     cmd: Subcommands,
 }
 
-fn main() -> Result<(), NuclErrors> {
-    let _log_guard = nucllib::logging::init_logger("nuclstart");
+fn main() -> NuclResult<()> {
     let args = Arg::parse().cmd;
     match args {
         Subcommands::SpawnFromJson { json } => {
             let unit: Unit = serde_json::from_str(&json)?;
-            spawn_monitor(unit)?; //let the main crate handle monitor or not.
+            let runas = unit.get_runas();
+            if runas == 0 || unit.get_autostart() {
+                let _log_guard = nucllib::logging::init_logger("nuclstart");
+                spawn_monitor(unit, runas)?;
+            } else if runas != 0 {
+                spawn_as_non_root(&unit, runas)?;
+            }
         }
     };
     Ok(())
 }
 
-pub fn exec_program(arguments: &[String]) -> Result<process::Child, NuclErrors> {
+pub fn exec_program(arguments: &[String], uid: u32) -> NuclResult<process::Child> {
+    let envs = build_envs()?;
     let res = process::Command::new(&arguments[0])
         .args(&arguments[1..])
+        .gid(uid)
+        .uid(uid)
+        .envs(envs)
         .spawn()?;
     Ok(res)
 }
-fn exec_monitor(unit: &Unit) -> Result<(), NuclErrors> {
-    println!("exec_monitor invoked");
+fn exec_monitor(unit: &Unit, uid: u32) -> NuclResult<()> {
     let mut sleep_dur = 1;
     let argument = unit.get_cmd();
     loop {
-        let res = exec_program(argument);
+        let res = exec_program(argument, uid);
         if res.is_err() {
             std::thread::sleep(std::time::Duration::from_secs(sleep_dur));
             sleep_dur *= 2;
@@ -54,9 +64,9 @@ fn exec_monitor(unit: &Unit) -> Result<(), NuclErrors> {
     }
 }
 
-pub fn spawn_monitor(unit: Unit) -> Result<u32, NuclErrors> {
-    let handle = thread!(move || -> Result<(), NuclErrors> {
-        exec_monitor(&unit)?;
+pub fn spawn_monitor(unit: Unit, uid: u32) -> NuclResult<u32> {
+    let handle = thread!(move || -> NuclResult<()> {
+        exec_monitor(&unit, uid)?;
         Ok(())
     })?;
     match handle.join() {
@@ -66,4 +76,76 @@ pub fn spawn_monitor(unit: Unit) -> Result<u32, NuclErrors> {
         ))),
     }?;
     Ok(std::process::id())
+}
+
+#[instrument(skip(unit), fields(unit_name = %unit.get_name()), level = "debug")]
+fn spawn_as_non_root(unit: &Unit, uid: u32) -> NuclResult<u32> {
+    info!("Attempting to execute unit process");
+
+    let (arguments, name) = { (unit.get_cmd().to_vec(), unit.get_name().clone()) };
+
+    trace!(?arguments, "Extracted unit execution arguments");
+    let shared_unit = unit.clone().shared();
+
+    let res = thread!(move || -> NuclResult<u32> {
+        debug!("Spawning child process for unit");
+        let mut child = exec_program(&arguments, uid)?;
+        let id = child.id();
+        info!(child_pid = id, "Successfully spawned process");
+
+        {
+            trace!("Marking unit as running in ALREADY_RUNNING map");
+            RunningRegistry::add_unit(shared_unit.clone(), child.id())?;
+        }
+
+        // Waiter thread
+        thread!(move || -> NuclResult<()> {
+            trace!(child_pid = id, "Waiter thread actively monitoring process");
+            match child.wait() {
+                Ok(status) => info!(child_pid = id, exit_status = ?status, "Child process exited"),
+                Err(e) => error!(child_pid = id, error = ?e, "Failed waiting on child process"),
+            }
+
+            trace!(unit_name = %name, "Unmarking unit from ALREADY_RUNNING");
+            RunningRegistry::remove_unit(shared_unit.clone())?;
+            Ok(())
+        })?;
+
+        Ok(id)
+    })?;
+
+    match res.join() {
+        Ok(val) => {
+            debug!("Unit execution thread returned successfully");
+            Ok(val?)
+        }
+        Err(e) => {
+            let panic_msg = extract_panic_message(e);
+            error!(panic_message = %panic_msg, "Unit execution thread panicked");
+            Err(NuclErrors::ThreadPanic(panic_msg))
+        }
+    }
+}
+
+macro_rules! hashmap {
+    ($($key:expr => $val:expr,)* $(,)?) => {
+        {
+            let mut hashmap_new = std::collections::HashMap::new();
+            $(
+                hashmap_new.insert($key.to_string(), $val.to_string());
+            )*
+            hashmap_new
+        }
+    };
+}
+
+fn build_envs() -> NuclResult<HashMap<String, String>> {
+    let hashmap = hashmap!(
+        "USER" => "aschere",
+        "HOME" => "/home/aschere/",
+        "PATH" => "/usr/local/bin:/usr/bin:/bin",
+        "DBUS_SESSION_BUS_ADDRESS" => "unix:path=/run/user/1000/bus",
+    );
+
+    Ok(hashmap)
 }
