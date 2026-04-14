@@ -29,18 +29,6 @@ fn main() -> NuclResult<()> {
         std::fs::create_dir_all(parent)?
     }
 
-    if is_root() {
-        debug!("Running as root: spawning zombie reaper thread");
-        thread!(|| {
-            loop {
-                reap_children();
-                std::thread::sleep(std::time::Duration::from_secs(120));
-            }
-        })?;
-    } else {
-        warn!("Daemon not running as root. Some process management features may fail.");
-    }
-
     //Start autostart
     thread!(|| -> NuclResult<()> {
         nucld::autostart::autostart_units()?;
@@ -54,18 +42,23 @@ fn main() -> NuclResult<()> {
 
     info!(path = %socket_path.display(), "nucld listening for commands");
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                // We don't want a client error to crash the whole daemon loop
-                if let Err(e) = handle_client(stream) {
-                    error!(error = ?e, "Error handling client request");
+    thread!(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    // We don't want a client error to crash the whole daemon loop
+                    if let Err(e) = handle_client(stream) {
+                        error!(error = ?e, "Error handling client request");
+                    }
                 }
-            }
-            Err(e) => error!(error = %e, "Incoming connection failed"),
-        };
+                Err(e) => error!(error = %e, "Incoming connection failed"),
+            };
+        }
+    })?;
+    loop {
+        reap_children();
+        std::thread::sleep(std::time::Duration::from_secs(120));
     }
-    Ok(())
 }
 
 #[instrument(level = "debug")]
