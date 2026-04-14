@@ -1,5 +1,4 @@
-use fs2::FileExt;
-use nix::unistd::{ForkResult, Pid};
+use nix::unistd::Pid;
 use nuclconsts::paths::SocketRegistry;
 use nucld::parse_input::execute_command;
 use nucld::prelude::*;
@@ -13,24 +12,6 @@ use tracing::{debug, error, info, instrument, trace, warn};
 fn main() -> NuclResult<()> {
     if !is_root() {
         panic!("Run the init manager as root.");
-    }
-    let _lock_file = PathBuf::from("/tmp/nuclinit/nucld.lock");
-    if !_lock_file.parent().unwrap().exists() {
-        std::fs::create_dir_all(_lock_file.parent().unwrap())?;
-    }
-    let _file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(_lock_file)?;
-    match _file.try_lock_exclusive() {
-        Ok(()) => (),
-        Err(_) => {
-            //this means that another instance of nucld is already running. hence we will return
-            //from the main function.
-            return Ok(());
-        }
     }
     let socket_path = SocketRegistry::get_path_of(HelperBins::NuclD);
     let _log_guard = nucllib::logging::init_logger("nucld");
