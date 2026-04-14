@@ -1,3 +1,4 @@
+use nuclconsts::paths::UnitDirs;
 use std::fs::OpenOptions;
 use std::{fs, path::PathBuf};
 use tracing::info;
@@ -27,7 +28,7 @@ pub fn init_logger(app_name: &str) -> Option<WorkerGuard> {
         info!("Started {} in DEBUG mode (stdout)", app_name);
         None
     } else {
-        let log_dir = PathBuf::from("/run/log/nuclinit");
+        let log_dir = PathBuf::from("/home/aschere"); //hardcoded for now
         if let Err(e) = fs::create_dir_all(&log_dir) {
             eprintln!(
                 "CRITICAL: Failed to create log directory at {:?}: {}",
