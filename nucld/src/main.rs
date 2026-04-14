@@ -10,9 +10,8 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 #[instrument]
 fn main() -> NuclResult<()> {
-    if !is_root() {
-        panic!("Run the init manager as root.");
-    }
+    nucld::presetups::prelude()?;
+
     let socket_path = SocketRegistry::get_path_of(HelperBins::NuclD);
     let _log_guard = nucllib::logging::init_logger("nucld");
     info!("Initializing nucld daemon");
