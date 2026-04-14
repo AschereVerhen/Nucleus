@@ -45,7 +45,7 @@ fn exec_agetty_on_ttys() -> NuclResult<()> {
                 .spawn()?
         };
     }
-    todo!()
+    Ok(())
 }
 
 pub fn prelude() -> NuclResult<()> {
