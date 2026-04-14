@@ -21,23 +21,26 @@ impl std::fmt::Display for HelperBins {
     }
 }
 
-static NUCLINIT_HELPER_BINARIES: LazyLock<HashMap<HelperBins, PathBuf>> = LazyLock::new(|| {
-    let mut map = HashMap::new();
-    for bin in HelperBins::iter() {
-        if let Ok(path) = which::which(bin.to_string()) {
-            map.insert(bin, path);
-        }
-    }
-
-    map
-});
+// static NUCLINIT_HELPER_BINARIES: LazyLock<HashMap<HelperBins, PathBuf>> = LazyLock::new(|| {
+//     let mut map = HashMap::new();
+//     for bin in HelperBins::iter() {
+//         if let Ok(path) = which::which(bin.to_string()) {
+//             map.insert(bin, path);
+//         }
+//     }
+//
+//     map
+// });
 
 pub struct HelperBinsRegistry;
 
 impl HelperBinsRegistry {
     pub fn get_path_of(name: HelperBins) -> Option<PathBuf> {
-        let r = &*NUCLINIT_HELPER_BINARIES;
-        r.get(&name).cloned()
+        match name {
+            HelperBins::NuclD => Some("/usr/local/bin/nucld".into()),
+            HelperBins::NuclStart => Some("/usr/local/bin/nuclstart".into()),
+            HelperBins::NuclCtl => Some("/usr/local/bin/nuclctl".into()),
+        }
     }
 }
 
