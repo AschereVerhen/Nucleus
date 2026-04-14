@@ -1,5 +1,5 @@
 use clap::Parser;
-use nuclconsts::paths::SOCKET_PATH;
+use nuclconsts::paths::{HelperBins, SocketRegistry};
 use nuclconsts::units::Unit;
 use nuclerrors::NuclResult;
 use nucllib::commands::Commands;
@@ -16,9 +16,9 @@ pub struct Cmd {
 }
 
 fn main() -> NuclResult<()> {
-    // let _log_guard = nucllib::logging::init_logger("nuclctl");
+    let _log_guard = nucllib::logging::init_logger("nuclctl");
     let s = Cmd::parse();
-    let mut stream = UnixStream::connect(&*SOCKET_PATH)?;
+    let mut stream = UnixStream::connect(SocketRegistry::get_path_of(HelperBins::NuclD))?;
     let input = serde_json::to_string(&s.cmd)?;
     stream.write_all(input.as_bytes())?;
     //Now listen to the stream:

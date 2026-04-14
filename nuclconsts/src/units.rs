@@ -10,6 +10,33 @@ use std::sync::{LazyLock, RwLock};
 use tabled::Tabled;
 use walkdir::WalkDir;
 
+#[derive(Default, Serialize, Deserialize, Debug, Tabled, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct UserId {
+    uid: u32,
+    gid: u32,
+}
+
+impl std::fmt::Display for UserId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}):({})", self.uid, self.gid)
+    }
+}
+
+impl UserId {
+    pub fn get_uid(&self) -> u32 {
+        self.uid
+    }
+    pub fn get_gid(&self) -> u32 {
+        self.gid
+    }
+    pub fn new(uid: u32, gid: u32) -> Self {
+        Self { uid, gid }
+    }
+    pub fn is_root(&self) -> bool {
+        self.uid == 0
+    }
+}
+
 #[derive(Default)]
 pub struct UnitBuilder {
     name: Option<String>,
@@ -17,7 +44,7 @@ pub struct UnitBuilder {
     restart: bool,
     dependencies: Vec<String>,
     autostart: bool,
-    runas: Option<u32>,
+    runas: Option<UserId>,
 }
 
 impl UnitBuilder {
@@ -46,7 +73,7 @@ impl UnitBuilder {
         self
     }
 
-    pub fn runas(mut self, runas: u32) -> Self {
+    pub fn runas(mut self, runas: UserId) -> Self {
         self.runas = Some(runas);
         self
     }
@@ -58,7 +85,7 @@ impl UnitBuilder {
             restart: self.restart,
             autostart: self.autostart,
             dependencies: Some(self.dependencies),
-            runas: self.runas.unwrap_or(0u32),
+            runas: self.runas.unwrap_or(UserId::default()),
         }
     }
 }
@@ -74,8 +101,8 @@ fn format_optional_vec(opt: &Option<Vec<String>>) -> String {
     }
 }
 
-fn default_value_runas() -> u32 {
-    0u32
+fn default_value_runas() -> UserId {
+    UserId::default()
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Tabled, Default, Hash, PartialEq, Eq)]
@@ -90,7 +117,7 @@ pub struct Unit {
     #[tabled(display = "format_optional_vec")]
     dependencies: Option<Vec<String>>, //File names.
     #[serde(default = "default_value_runas")]
-    runas: u32, //Pid
+    runas: UserId, //Pid
 }
 
 impl Unit {
@@ -109,7 +136,7 @@ impl Unit {
     pub fn get_autostart(&self) -> bool {
         self.autostart
     }
-    pub fn get_runas(&self) -> u32 {
+    pub fn get_runas(&self) -> UserId {
         self.runas
     }
 
@@ -142,9 +169,9 @@ pub struct UnitFS;
 
 impl UnitFS {
     pub fn write_unit(unit_struct: SharedUnit) -> NuclResult<()> {
-        let dirs = &*crate::paths::DIRUNIT;
+        let dirs = crate::paths::UnitDirs::get_system_dir();
         let user = unit_struct.lock()?.get_runas();
-        let user = nix::unistd::User::from_uid(Uid::from(user))?.unwrap(); //Note: if the unit_struct
+        let user = nix::unistd::User::from_uid(Uid::from(user.get_uid()))?.unwrap(); //Note: if the unit_struct
         //exists, that means the conversion from "String" -> u32 has already been done AND user is
         //sure to exist. So unwrapping() here is safe.
         let e = user.dir.join(".local/share/nuclinit/units");
@@ -155,7 +182,7 @@ impl UnitFS {
             }
             e.as_path()
         } else {
-            dirs.system_dir.as_path()
+            &dirs
         };
 
         let new_unit_file = { dir.join(format!("{}.toml", unit_struct.lock()?.get_name())) };
@@ -171,7 +198,7 @@ impl UnitFS {
     }
 
     pub fn remove_unit(unit_name: String) -> NuclResult<()> {
-        let dirs = &*crate::paths::DIRUNIT;
+        let dirs = &*crate::paths::UnitDirs::get_system_dir();
         let unit = UnitRegistry::get_unit(&unit_name);
 
         if unit.is_none() {
@@ -181,7 +208,7 @@ impl UnitFS {
         let unit = unit.unwrap();
 
         let user = unit.lock()?.get_runas();
-        let user = nix::unistd::User::from_uid(Uid::from(user))?.unwrap(); //Safe because unit
+        let user = nix::unistd::User::from_uid(Uid::from(user.get_uid()))?.unwrap(); //Safe because unit
         //exists. and the extended reasoning is written above
         let e = user.dir.join(".local/share/nuclinit/units");
 
@@ -191,7 +218,7 @@ impl UnitFS {
             }
             e.as_path()
         } else {
-            dirs.system_dir.as_path()
+            dirs
         };
 
         let target_name = std::ffi::OsString::from(format!("{}.toml", unit_name));
@@ -222,7 +249,7 @@ static UNITS_REGISTRY: LazyLock<RwLock<HashMap<String, SharedUnit>>> = LazyLock:
 pub struct UnitRegistry;
 
 impl UnitRegistry {
-    pub fn get_unit(name: &String) -> Option<SharedUnit> {
+    pub fn get_unit(name: &str) -> Option<SharedUnit> {
         let guard = UNITS_REGISTRY.read().ok()?;
         guard.get(name).cloned()
     }
@@ -233,7 +260,7 @@ impl UnitRegistry {
         Ok(val)
     }
 
-    pub fn remove_unit(name: &String) -> NuclResult<()> {
+    pub fn remove_unit(name: &str) -> NuclResult<()> {
         let mut g = UNITS_REGISTRY.write()?;
         let _ = g.remove_entry(name);
         Ok(())
@@ -258,7 +285,7 @@ impl RunningRegistry {
         Ok(guard.contains_key(unit.lock()?.get_name()))
     }
 
-    pub fn get_unit(name: &String) -> Option<SharedUnit> {
+    pub fn get_unit(name: &str) -> Option<SharedUnit> {
         let guard = ALREADY_RUNNING.read().ok()?;
         guard.get(name).map(|(unit, _)| Arc::clone(unit))
     }

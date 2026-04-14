@@ -1,47 +1,78 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::LazyLock;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 
-pub static NUCLD_HELPER_BINARIES: LazyLock<HashMap<String, PathBuf>> = LazyLock::new(|| {
+#[derive(Eq, Hash, PartialEq, EnumIter)]
+pub enum HelperBins {
+    NuclD,
+    NuclCtl,
+    NuclStart,
+}
+
+impl std::fmt::Display for HelperBins {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HelperBins::NuclD => write!(f, "nucld"),
+            HelperBins::NuclCtl => write!(f, "nuclctl"),
+            HelperBins::NuclStart => write!(f, "nuclstart"),
+        }
+    }
+}
+
+static NUCLINIT_HELPER_BINARIES: LazyLock<HashMap<HelperBins, PathBuf>> = LazyLock::new(|| {
     let mut map = HashMap::new();
-    const BINARIES: &[&str] = &["nucld", "nuclctl", "nuclstart"];
-    for bin in BINARIES {
-        if let Ok(path) = which::which(bin) {
-            map.insert(bin.to_string(), path);
+    for bin in HelperBins::iter() {
+        if let Ok(path) = which::which(bin.to_string()) {
+            map.insert(bin, path);
         }
     }
 
     map
 });
 
-pub struct DirPaths {
-    pub user_dir: PathBuf,
-    pub system_dir: PathBuf,
+pub struct HelperBinsRegistry;
+
+impl HelperBinsRegistry {
+    pub fn get_path_of(name: HelperBins) -> Option<PathBuf> {
+        let r = &*NUCLINIT_HELPER_BINARIES;
+        r.get(&name).cloned()
+    }
 }
 
-pub static DIRUNIT: LazyLock<DirPaths> = LazyLock::new(|| {
-    let user_dir = if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
-        PathBuf::from(data_home).join("nuclinit/units")
-    } else {
-        dirs::home_dir()
-            .expect("Failed to get home directory")
-            .join(".local/share/nuclinit/units")
-    };
+pub struct UnitDirs;
 
+impl UnitDirs {
+    pub fn get_system_dir() -> PathBuf {
+        DIRUNIT.clone().to_path_buf()
+    }
+}
+
+static DIRUNIT: LazyLock<PathBuf> = LazyLock::new(|| {
     let system_dir = PathBuf::from("/etc/nuclinit/units");
 
-    if !user_dir.exists() {
-        let _ = std::fs::create_dir_all(&user_dir);
-    }
     if !system_dir.exists() {
         let _ = std::fs::create_dir_all(&system_dir);
     }
 
-    DirPaths {
-        user_dir,
-        system_dir,
-    }
+    system_dir
 });
 
-pub static SOCKET_PATH: LazyLock<PathBuf> =
-    LazyLock::new(|| PathBuf::from("/tmp/nuclinit/nucld.sock"));
+static SOCKET_PATHS: LazyLock<HashMap<HelperBins, PathBuf>> = LazyLock::new(|| {
+    let mut hashmap = HashMap::new();
+    for bin in HelperBins::iter() {
+        let path = PathBuf::from(format!("/tmp/nuclinit/{}.sock", bin));
+        hashmap.insert(bin, path);
+    }
+    hashmap
+});
+
+pub struct SocketRegistry;
+
+impl SocketRegistry {
+    pub fn get_path_of(h: HelperBins) -> PathBuf {
+        let g = &*SOCKET_PATHS;
+        g.get(&h).cloned().unwrap() //Sure to be there.
+    }
+}

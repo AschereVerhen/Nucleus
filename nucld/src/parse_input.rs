@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use nix::sys::signal::SIGKILL;
 use nix::unistd::Pid;
-use nuclconsts::units::UnitBuilder;
+use nuclconsts::units::{UnitBuilder, UserId};
 use nucllib::ipc::ResponseData;
 use tracing::{Span, debug, info, instrument, trace, warn};
 
@@ -91,7 +91,8 @@ pub fn execute_command(cmd: Commands) -> NuclResult<ResponseData> {
                 if id.is_none() {
                     return Err(NuclErrors::UserNotFound { name: runas });
                 }
-                id.unwrap().uid.as_raw()
+                let id = id.unwrap();
+                UserId::new(id.uid.as_raw(), id.gid.as_raw())
             };
             let unit_struct = UnitBuilder::new()
                 .name(name.clone())

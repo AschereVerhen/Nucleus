@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use nuclconsts::units::Unit;
+use nuclconsts::units::{Unit, UserId};
 use nucld::prelude::*;
 use nuclerrors::NuclErrors;
 use nucllib::thread;
@@ -24,34 +24,34 @@ fn main() -> NuclResult<()> {
     let args = Arg::parse().cmd;
     match args {
         Subcommands::SpawnFromJson { json } => {
+            let _log_guard = nucllib::logging::init_logger("nuclstart");
             let unit: Unit = serde_json::from_str(&json)?;
             let runas = unit.get_runas();
-            if runas == 0 || unit.get_autostart() {
-                let _log_guard = nucllib::logging::init_logger("nuclstart");
+            if unit.get_autostart() {
                 spawn_monitor(unit, runas)?;
-            } else if runas != 0 {
-                spawn_as_non_root(&unit, runas)?;
+            } else {
+                exec_process(&unit, runas)?;
             }
         }
     };
     Ok(())
 }
 
-pub fn exec_program(arguments: &[String], uid: u32) -> NuclResult<process::Child> {
+pub fn exec_program(arguments: &[String], id: UserId) -> NuclResult<process::Child> {
     let envs = build_envs()?;
     let res = process::Command::new(&arguments[0])
         .args(&arguments[1..])
-        .gid(uid)
-        .uid(uid)
+        .gid(id.get_gid())
+        .uid(id.get_uid())
         .envs(envs)
         .spawn()?;
     Ok(res)
 }
-fn exec_monitor(unit: &Unit, uid: u32) -> NuclResult<()> {
+fn exec_monitor(unit: &Unit, id: UserId) -> NuclResult<()> {
     let mut sleep_dur = 1;
     let argument = unit.get_cmd();
     loop {
-        let res = exec_program(argument, uid);
+        let res = exec_program(argument, id);
         if res.is_err() {
             std::thread::sleep(std::time::Duration::from_secs(sleep_dur));
             sleep_dur *= 2;
@@ -64,9 +64,9 @@ fn exec_monitor(unit: &Unit, uid: u32) -> NuclResult<()> {
     }
 }
 
-pub fn spawn_monitor(unit: Unit, uid: u32) -> NuclResult<u32> {
+pub fn spawn_monitor(unit: Unit, id: UserId) -> NuclResult<u32> {
     let handle = thread!(move || -> NuclResult<()> {
-        exec_monitor(&unit, uid)?;
+        exec_monitor(&unit, id)?;
         Ok(())
     })?;
     match handle.join() {
@@ -79,7 +79,7 @@ pub fn spawn_monitor(unit: Unit, uid: u32) -> NuclResult<u32> {
 }
 
 #[instrument(skip(unit), fields(unit_name = %unit.get_name()), level = "debug")]
-fn spawn_as_non_root(unit: &Unit, uid: u32) -> NuclResult<u32> {
+fn exec_process(unit: &Unit, id: UserId) -> NuclResult<u32> {
     info!("Attempting to execute unit process");
 
     let (arguments, name) = { (unit.get_cmd().to_vec(), unit.get_name().clone()) };
@@ -89,14 +89,12 @@ fn spawn_as_non_root(unit: &Unit, uid: u32) -> NuclResult<u32> {
 
     let res = thread!(move || -> NuclResult<u32> {
         debug!("Spawning child process for unit");
-        let mut child = exec_program(&arguments, uid)?;
+        let mut child = exec_program(&arguments, id)?;
         let id = child.id();
         info!(child_pid = id, "Successfully spawned process");
 
-        {
-            trace!("Marking unit as running in ALREADY_RUNNING map");
-            RunningRegistry::add_unit(shared_unit.clone(), child.id())?;
-        }
+        trace!("Marking unit as running in ALREADY_RUNNING map");
+        RunningRegistry::add_unit(shared_unit.clone(), child.id())?;
 
         // Waiter thread
         thread!(move || -> NuclResult<()> {

@@ -24,7 +24,7 @@ pub use std::fs::DirEntry;
 pub use walkdir::WalkDir;
 
 // ===== Crate items =====
-pub use crate::{exec::Exec, get_path_of};
+pub use crate::exec::Exec;
 
 pub use nuclconsts::units::{RunningRegistry, SharedUnit, Unit, UnitFS, UnitRegistry};
 

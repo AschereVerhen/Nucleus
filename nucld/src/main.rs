@@ -1,6 +1,6 @@
 use fs2::FileExt;
 use nix::unistd::{ForkResult, Pid};
-use nuclconsts::paths::SOCKET_PATH;
+use nuclconsts::paths::SocketRegistry;
 use nucld::parse_input::execute_command;
 use nucld::prelude::*;
 use nuclerrors::NuclResult;
@@ -23,6 +23,7 @@ fn daemonize() -> NuclResult<u32> {
     }
 }
 
+#[instrument]
 fn main() -> NuclResult<()> {
     if !is_root() {
         panic!("Run the init manager as root.");
@@ -45,24 +46,28 @@ fn main() -> NuclResult<()> {
             return Ok(());
         }
     }
-
-    // let res = daemonize()?;
-    // if res != 0 {
-    //     info!(pid=%res, "Daemonized nucld with "); //pid = pid ofc
-    //     return Ok(()); //kill the parent thread;
-    // }
-
-    let _log_guard = nucllib::logging::init_logger("nucld");
-    info!("Initializing nucld daemon");
-    if SOCKET_PATH.exists() {
-        trace!(
-            "Cleaning up existing domain socket at {}",
-            &SOCKET_PATH.display()
-        );
-        let _ = std::fs::remove_file(&*SOCKET_PATH);
+    if std::env::var("NuclNoDaemon").is_err() {
+        //This env var should not be set for daemonization
+        //to occure.
+        let res = daemonize()?;
+        if res != 0 {
+            info!(pid=%res, "Daemonized nucld with "); //pid = pid ofc
+            return Ok(()); //kill the parent thread;
+        }
     }
 
-    if let Some(parent) = SOCKET_PATH.parent()
+    let socket_path = SocketRegistry::get_path_of(HelperBins::NuclD);
+    let _log_guard = nucllib::logging::init_logger("nucld");
+    info!("Initializing nucld daemon");
+    if socket_path.exists() {
+        trace!(
+            "Cleaning up existing domain socket at {}",
+            &socket_path.display()
+        );
+        let _ = std::fs::remove_file(&*socket_path);
+    }
+
+    if let Some(parent) = socket_path.parent()
         && !parent.exists()
     {
         std::fs::create_dir_all(parent)?
@@ -86,12 +91,12 @@ fn main() -> NuclResult<()> {
         Ok(())
     })?;
 
-    let listener = UnixListener::bind(&*SOCKET_PATH).map_err(|e| {
-        error!(error = %e, "Failed to bind to Unix socket at {}", SOCKET_PATH.display());
+    let listener = UnixListener::bind(&*socket_path).map_err(|e| {
+        error!(error = %e, "Failed to bind to Unix socket at {}", socket_path.display());
         e
     })?;
 
-    info!(path = %SOCKET_PATH.display(), "nucld listening for commands");
+    info!(path = %socket_path.display(), "nucld listening for commands");
 
     for stream in listener.incoming() {
         match stream {

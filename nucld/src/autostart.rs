@@ -1,27 +1,20 @@
-//This file is for the "enable" and "disable" commands handling.
-//
 use crate::prelude::*;
+use tracing::{info, instrument, trace};
 
-pub fn set_autostart_for_unit(name: &String, autostart: bool) -> NuclResult<()> {
-    let unit = UnitRegistry::get_unit(name);
-    if unit.is_none() {
-        Err(NuclErrors::UnitIsInvalid { name: name.clone() })?;
-    }
-    let unit = unit.unwrap();
-    {
-        let mut guard = unit.lock()?;
-        guard.set_autostart(autostart);
-    }
-    Ok(())
-}
-
+#[instrument(level = "info")]
 pub fn autostart_units() -> NuclResult<()> {
+    info!("Starting autostart units.");
     let units: Vec<SharedUnit> = UnitRegistry::get_all_units()?
         .iter()
+        .filter(|f| {
+            let g = f.lock().unwrap();
+            trace!(unit = %*g.get_name(), "Evaluating");
+            g.get_autostart()
+        })
         .cloned()
-        .filter(|f| f.lock().unwrap().get_autostart())
         .collect();
     for unit in units {
+        info!(unit = unit.lock()?.get_name(), "Execing");
         unit.exec()?;
     }
     Ok(())
