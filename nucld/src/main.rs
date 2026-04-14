@@ -9,20 +9,6 @@ use std::io::Read;
 use std::os::unix::net::{UnixListener, UnixStream};
 use tracing::{debug, error, info, instrument, trace, warn};
 
-fn daemonize() -> NuclResult<u32> {
-    let fork_res = unsafe { nix::unistd::fork()? };
-    match fork_res {
-        ForkResult::Child => {
-            nix::unistd::setsid()?;
-            Ok(0u32)
-        }
-        ForkResult::Parent { child } => {
-            let pid_child = child.as_raw();
-            Ok(pid_child as u32)
-        }
-    }
-}
-
 #[instrument]
 fn main() -> NuclResult<()> {
     if !is_root() {
@@ -46,16 +32,6 @@ fn main() -> NuclResult<()> {
             return Ok(());
         }
     }
-    if std::env::var("NuclNoDaemon").is_err() {
-        //This env var should not be set for daemonization
-        //to occure.
-        let res = daemonize()?;
-        if res != 0 {
-            info!(pid=%res, "Daemonized nucld with "); //pid = pid ofc
-            return Ok(()); //kill the parent thread;
-        }
-    }
-
     let socket_path = SocketRegistry::get_path_of(HelperBins::NuclD);
     let _log_guard = nucllib::logging::init_logger("nucld");
     info!("Initializing nucld daemon");
