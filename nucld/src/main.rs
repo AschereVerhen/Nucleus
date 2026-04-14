@@ -10,7 +10,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 #[instrument]
 fn main() -> NuclResult<()> {
-    nucld::presetups::prelude();
+    nucld::presetups::prelude()?;
 
     let socket_path = SocketRegistry::get_path_of(HelperBins::NuclD);
     let _log_guard = nucllib::logging::init_logger("nucld");
@@ -23,17 +23,17 @@ fn main() -> NuclResult<()> {
         let _ = std::fs::remove_file(&*socket_path);
     }
 
-    let _ = if let Some(parent) = socket_path.parent()
+    if let Some(parent) = socket_path.parent()
         && !parent.exists()
     {
-        std::fs::create_dir_all(parent);
-    };
+        std::fs::create_dir_all(parent)?
+    }
 
     //Start autostart
     thread!(|| -> NuclResult<()> {
-        nucld::autostart::autostart_units();
+        nucld::autostart::autostart_units()?;
         Ok(())
-    });
+    })?;
 
     let listener = UnixListener::bind(&*socket_path).map_err(|e| {
         error!(error = %e, "Failed to bind to Unix socket at {}", socket_path.display());
@@ -48,13 +48,13 @@ fn main() -> NuclResult<()> {
                 Ok(stream) => {
                     // We don't want a client error to crash the whole daemon loop
                     if let Err(e) = handle_client(stream) {
-                        // error!(error = e, "Error handling client request");
+                        error!(error = ?e, "Error handling client request");
                     }
                 }
                 Err(e) => error!(error = %e, "Incoming connection failed"),
             };
         }
-    });
+    })?;
     loop {
         reap_children();
         std::thread::sleep(std::time::Duration::from_secs(120));
