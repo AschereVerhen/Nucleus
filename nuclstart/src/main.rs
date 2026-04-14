@@ -27,7 +27,7 @@ fn main() -> NuclResult<()> {
             let _log_guard = nucllib::logging::init_logger("nuclstart");
             let unit: Unit = serde_json::from_str(&json)?;
             let runas = unit.get_runas();
-            if unit.get_autostart() {
+            if unit.get_restart() {
                 spawn_monitor(unit, runas)?;
             } else {
                 exec_process(&unit, runas)?;
