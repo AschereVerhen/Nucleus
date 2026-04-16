@@ -35,6 +35,9 @@ impl UserId {
     pub fn is_root(&self) -> bool {
         self.uid == 0
     }
+    pub fn root() -> Self {
+        Self { uid: 0, gid: 0 }
+    }
 }
 
 #[derive(Default)]
@@ -45,6 +48,7 @@ pub struct UnitBuilder {
     dependencies: Vec<String>,
     autostart: bool,
     runas: Option<UserId>,
+    user_defined: bool,
 }
 
 impl UnitBuilder {
@@ -78,6 +82,11 @@ impl UnitBuilder {
         self
     }
 
+    pub fn user_defined(mut self, b: bool) -> Self {
+        self.user_defined = b;
+        self
+    }
+
     pub fn build(self) -> Unit {
         Unit {
             name: self.name.ok_or("Name must be present").unwrap(),
@@ -85,7 +94,8 @@ impl UnitBuilder {
             restart: self.restart,
             autostart: self.autostart,
             dependencies: Some(self.dependencies),
-            runas: self.runas.unwrap_or(UserId::default()),
+            runas: self.runas.unwrap_or_default(),
+            user_defined: self.user_defined,
         }
     }
 }
@@ -105,6 +115,10 @@ fn default_value_runas() -> UserId {
     UserId::default()
 }
 
+fn default_value_user_defined() -> bool {
+    true
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, Tabled, Default, Hash, PartialEq, Eq)]
 pub struct Unit {
     name: String,
@@ -118,6 +132,8 @@ pub struct Unit {
     dependencies: Option<Vec<String>>, //File names.
     #[serde(default = "default_value_runas")]
     runas: UserId, //Pid
+    #[serde(default = "default_value_user_defined")]
+    user_defined: bool, //To distinguish between system and user_defined units.
 }
 
 impl Unit {
@@ -138,6 +154,10 @@ impl Unit {
     }
     pub fn get_runas(&self) -> UserId {
         self.runas
+    }
+
+    pub fn get_user_defined(&self) -> bool {
+        self.user_defined
     }
 
     pub fn set_name(&mut self, name: String) {

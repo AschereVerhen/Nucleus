@@ -30,7 +30,11 @@ fn main() -> NuclResult<()> {
     match res {
         ResponseData::JsonResponse(s) => {
             let result: Vec<Unit> = serde_json::from_str(&s)?;
-            let table = create_table(result);
+            let final_result = result
+                .into_iter()
+                .filter(|f| f.get_user_defined())
+                .collect::<Vec<Unit>>();
+            let table = create_table(final_result);
             println!("{}", table);
         }
         ResponseData::Empty => (),

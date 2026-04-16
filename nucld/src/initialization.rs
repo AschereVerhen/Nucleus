@@ -1,29 +1,86 @@
-use std::{
-    fs::OpenOptions,
-    os::{fd::AsRawFd, unix::process::CommandExt},
-};
+use nuclconsts::units::{UnitBuilder, UserId};
 
 //This file contains a few function to orcastrate the booting up sequence
 //
-use crate::{exec, prelude::*};
+use crate::prelude::*;
 
 fn make_tmpfs() -> NuclResult<()> {
     //We will create dev, sys, proc, tmp and run
-    let _ = Command::new("mount")
-        .args(["-t", "devtmpfs", "devtmpfs", "/dev"])
-        .status()?;
-    let _ = Command::new("mount")
-        .args(["-t", "proc", "proc", "/proc"])
-        .status()?;
-    let _ = Command::new("mount")
-        .args(["-t", "tmpfs", "tmpfs", "/run"])
-        .status()?;
-    let _ = Command::new("mount")
-        .args(["-t", "tmpfs", "tmpfs", "/tmp"])
-        .status()?;
-    let _ = Command::new("mount")
-        .args(["-t", "sysfs", "sys", "/sys"])
-        .status()?;
+    let devtmpfs = UnitBuilder::new()
+        .name("mount-dev".to_string())
+        .user_defined(false)
+        .dependencies(vec![])
+        .restart(false)
+        .runas(UserId::root())
+        .cmd(vec![
+            "mount".to_string(),
+            "-t".to_string(),
+            "devtmpfs".to_string(),
+            "devtmpfs".to_string(),
+            "/dev".to_string(),
+        ])
+        .autostart(true)
+        .build()
+        .shared();
+    UnitRegistry::add_unit(devtmpfs.clone())?;
+    devtmpfs.exec()?;
+
+    let tmpfs = UnitBuilder::new()
+        .name("mount-tmp".to_string())
+        .user_defined(false)
+        .dependencies(vec![])
+        .restart(false)
+        .runas(UserId::root())
+        .cmd(vec![
+            "mount".to_string(),
+            "-t".to_string(),
+            "tmpfs".to_string(),
+            "tmpfs".to_string(),
+            "/tmp".to_string(),
+        ])
+        .autostart(true)
+        .build()
+        .shared();
+    UnitRegistry::add_unit(tmpfs.clone())?;
+    tmpfs.exec()?;
+
+    let runfs = UnitBuilder::new()
+        .name("mount-run".to_string())
+        .user_defined(false)
+        .dependencies(vec![])
+        .restart(false)
+        .runas(UserId::root())
+        .cmd(vec![
+            "mount".to_string(),
+            "-t".to_string(),
+            "tmpfs".to_string(),
+            "tmpfs".to_string(),
+            "/run".to_string(),
+        ])
+        .autostart(true)
+        .build()
+        .shared();
+    UnitRegistry::add_unit(runfs.clone())?;
+    runfs.exec()?;
+
+    let sysfs = UnitBuilder::new()
+        .name("mount-tmp".to_string())
+        .user_defined(false)
+        .dependencies(vec![])
+        .restart(false)
+        .runas(UserId::root())
+        .cmd(vec![
+            "mount".to_string(),
+            "-t".to_string(),
+            "sysfs".to_string(),
+            "sys".to_string(),
+            "/sys".to_string(),
+        ])
+        .autostart(true)
+        .build()
+        .shared();
+    UnitRegistry::add_unit(tmpfs.clone())?;
+    sysfs.exec()?;
 
     Ok(())
 }
@@ -31,7 +88,18 @@ fn make_tmpfs() -> NuclResult<()> {
 fn execute_dbus() -> NuclResult<()> {
     std::fs::create_dir_all("/run/dbus/")?;
     let _ = Command::new("dbus-daemon").arg("--system").spawn()?;
-
+    let dbus = UnitBuilder::new()
+        .name("dbus".to_string())
+        .user_defined(false)
+        .dependencies(vec![])
+        .restart(false)
+        .runas(UserId::root())
+        .cmd(vec!["dbus-daemon".to_string(), "--system".to_string()])
+        .autostart(true)
+        .build()
+        .shared();
+    UnitRegistry::add_unit(dbus.clone())?;
+    dbus.exec()?;
     Ok(())
 }
 
@@ -51,23 +119,18 @@ fn exec_agetty() -> NuclResult<()> {
 //num => [1, 6]
 fn exec_agetty_on_ttys(num: u8) -> NuclResult<()> {
     let tty_path = format!("/dev/tty{}", num);
-    let tty = OpenOptions::new().read(true).write(true).open(&tty_path)?;
-    unsafe {
-        Command::new("/sbin/agetty")
-            .arg(tty_path)
-            .pre_exec(move || {
-                nix::unistd::setsid()?;
-                let fd = tty.as_raw_fd();
-                nix::libc::ioctl(fd, nix::libc::TIOCSCTTY, 0);
-
-                nix::libc::dup2(fd, 0);
-                nix::libc::dup2(fd, 1);
-                nix::libc::dup2(fd, 2);
-
-                Ok(())
-            })
-            .spawn()?
-    };
+    let dbus = UnitBuilder::new()
+        .name(format!("getty@tty{num}"))
+        .user_defined(false)
+        .dependencies(vec![])
+        .restart(false)
+        .runas(UserId::root())
+        .cmd(vec!["/sbin/agetty".to_string(), tty_path])
+        .autostart(true)
+        .build()
+        .shared();
+    UnitRegistry::add_unit(dbus.clone())?;
+    dbus.exec()?;
     Ok(())
 }
 
