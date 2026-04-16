@@ -1,4 +1,7 @@
-use std::os::unix::process::CommandExt;
+use std::{
+    fs::OpenOptions,
+    os::{fd::AsRawFd, unix::process::CommandExt},
+};
 
 //This file contains a few function to orcastrate the booting up sequence
 //
@@ -34,12 +37,20 @@ fn execute_dbus() -> NuclResult<()> {
 
 fn exec_agetty_on_ttys() -> NuclResult<()> {
     for num in 0..9 {
-        let tty = format!("/dev/tty{}", num);
-        let _ = unsafe {
+        let tty_path = format!("/dev/tty{}", num);
+        let tty = OpenOptions::new().read(true).write(true).open(&tty_path)?;
+        unsafe {
             Command::new("/sbin/agetty")
-                .args([tty, "115200".into(), "linux".into()])
-                .pre_exec(|| {
+                .args([tty_path, "115200".into(), "linux".into()])
+                .pre_exec(move || {
                     nix::unistd::setsid()?;
+                    let fd = tty.as_raw_fd();
+                    nix::libc::ioctl(fd, nix::libc::TIOCSCTTY, 0);
+
+                    nix::libc::dup2(fd, 0);
+                    nix::libc::dup2(fd, 1);
+                    nix::libc::dup2(fd, 2);
+
                     Ok(())
                 })
                 .spawn()?
