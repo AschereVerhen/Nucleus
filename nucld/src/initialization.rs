@@ -54,7 +54,7 @@ fn exec_agetty_on_ttys(num: u8) -> NuclResult<()> {
     let tty = OpenOptions::new().read(true).write(true).open(&tty_path)?;
     unsafe {
         Command::new("/sbin/agetty")
-            .args([tty_path, "115200".into(), "linux".into()])
+            .arg(tty_path)
             .pre_exec(move || {
                 nix::unistd::setsid()?;
                 let fd = tty.as_raw_fd();
