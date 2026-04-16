@@ -2,15 +2,18 @@ use nix::unistd::Pid;
 use nuclconsts::paths::SocketRegistry;
 use nucld::parse_input::execute_command;
 use nucld::prelude::*;
+use nucld::signals::{GOT_SIGCHLD, GOT_TERMINATE, handle_signals, terminate};
 use nuclerrors::NuclResult;
 use nucllib::ipc::IpcResponse;
 use std::io::Read;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::sync::atomic::Ordering;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 #[instrument]
 fn main() -> NuclResult<()> {
-    nucld::presetups::prelude()?;
+    nucld::initialization::prelude()?; //Basic initialization.
+    handle_signals()?; //Set up signal handling.
 
     let socket_path = SocketRegistry::get_path_of(HelperBins::NuclD);
     let _log_guard = nucllib::logging::init_logger("nucld");
@@ -56,8 +59,12 @@ fn main() -> NuclResult<()> {
         }
     })?;
     loop {
-        reap_children();
-        std::thread::sleep(std::time::Duration::from_secs(120));
+        if GOT_SIGCHLD.swap(false, Ordering::SeqCst) {
+            reap_children();
+        }
+        if GOT_TERMINATE.swap(false, Ordering::SeqCst) {
+            terminate(nix::sys::reboot::RebootMode::RB_POWER_OFF)?; //WARN: Hardcoded for now.
+        }
     }
 }
 

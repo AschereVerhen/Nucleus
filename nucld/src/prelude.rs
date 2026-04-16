@@ -32,3 +32,8 @@ pub use nuclconsts::units::{RunningRegistry, SharedUnit, Unit, UnitFS, UnitRegis
 pub use serde::{Deserialize, Serialize};
 pub use std::io::{Read, Write};
 pub use tabled::Tabled;
+
+// ==== Tracing =====
+pub use tracing::{
+    debug, debug_span, error, error_span, info, info_span, instrument, trace, trace_span,
+};

@@ -1,4 +1,3 @@
-use nuclconsts::paths::UnitDirs;
 use std::fs::OpenOptions;
 use std::{fs, path::PathBuf};
 use tracing::info;
