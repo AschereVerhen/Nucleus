@@ -3,7 +3,10 @@ use nuclconsts::units::{Unit, UserId};
 use nucld::prelude::*;
 use nuclerrors::NuclErrors;
 use nucllib::thread;
-use std::{os::unix::process::CommandExt, process};
+use std::{
+    os::unix::process::CommandExt,
+    process::{self, Stdio},
+};
 use tracing::{debug, error, info, instrument, trace};
 
 #[derive(Subcommand, Clone)]
@@ -19,6 +22,8 @@ struct Arg {
     #[command(subcommand)]
     cmd: Subcommands,
 }
+
+static PID_OF_PROGRAM: LazyLock<RwLock<u32>> = LazyLock::new(|| RwLock::new(0));
 
 fn main() -> NuclResult<()> {
     let args = Arg::parse().cmd;
@@ -37,21 +42,50 @@ fn main() -> NuclResult<()> {
     Ok(())
 }
 
-pub fn exec_program(arguments: &[String], id: UserId) -> NuclResult<process::Child> {
+pub fn exec_program(name: String, arguments: &[String], id: UserId) -> NuclResult<process::Child> {
+    //NOTE: Arguments has a length of >= 1. That is guareented by the validation step.
+    //as a unit cannot NOT have a cmd.
+    //And name is sure to be there as a unit cannot NOT have an *unique* name attached to it.
+    let unit_logs = PathBuf::from(format!("/run/log/nuclinit/units/{}", name));
+    if !unit_logs.exists() {
+        std::fs::create_dir_all(&unit_logs)?
+    }
+    let stdout_file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .read(false)
+        .open(unit_logs.join(format!("{}.out", &arguments[0])))?;
+
+    let stderr_file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .read(false)
+        .open(unit_logs.join(format!("{}.err", &arguments[0])))?;
+
     let envs = build_envs()?;
-    let res = process::Command::new(&arguments[0])
-        .args(&arguments[1..])
-        .gid(id.get_gid())
-        .uid(id.get_uid())
-        .envs(envs)
-        .spawn()?;
-    Ok(res)
+    let mut res = process::Command::new(&arguments[0]);
+    if arguments.len() != 1 {
+        res.args(&arguments[1..]);
+    }
+    res.env_clear();
+    res.gid(id.get_gid());
+    res.uid(id.get_uid());
+    res.envs(envs);
+
+    res.stdout(Stdio::from(stdout_file));
+    res.stderr(Stdio::from(stderr_file));
+
+    let child = res.spawn()?;
+    *PID_OF_PROGRAM.write()? = child.id();
+    Ok(child)
 }
 fn exec_monitor(unit: &Unit, id: UserId) -> NuclResult<()> {
     let mut sleep_dur = 1;
     let argument = unit.get_cmd();
     loop {
-        let res = exec_program(argument, id);
+        let res = exec_program(unit.get_name().clone(), argument, id);
         if res.is_err() {
             std::thread::sleep(std::time::Duration::from_secs(sleep_dur));
             sleep_dur *= 2;
@@ -89,7 +123,7 @@ fn exec_process(unit: &Unit, id: UserId) -> NuclResult<u32> {
 
     let res = thread!(move || -> NuclResult<u32> {
         debug!("Spawning child process for unit");
-        let mut child = exec_program(&arguments, id)?;
+        let mut child = exec_program(name.clone(), &arguments, id)?;
         let id = child.id();
         info!(child_pid = id, "Successfully spawned process");
 

@@ -43,4 +43,6 @@ pub enum Commands {
     RemoveUnit {
         name: String,
     },
+    Poweroff,
+    Reboot,
 }

@@ -27,7 +27,7 @@ pub fn init_logger(app_name: &str) -> Option<WorkerGuard> {
         info!("Started {} in DEBUG mode (stdout)", app_name);
         None
     } else {
-        let log_dir = PathBuf::from("/home/aschere"); //hardcoded for now
+        let log_dir = PathBuf::from("/run/log/nuclinit/"); //hardcoded for now
         if let Err(e) = fs::create_dir_all(&log_dir) {
             eprintln!(
                 "CRITICAL: Failed to create log directory at {:?}: {}",
@@ -35,8 +35,8 @@ pub fn init_logger(app_name: &str) -> Option<WorkerGuard> {
             );
         }
 
-        let log_path = log_dir.join(format!("{}.log", app_name));
-
+        let log_name = format!("{}.log", app_name);
+        let log_path = log_dir.join(&log_name);
         // Truncate the file (create if not exists)
         if let Err(e) = OpenOptions::new()
             .create(true)
@@ -50,8 +50,7 @@ pub fn init_logger(app_name: &str) -> Option<WorkerGuard> {
             );
             return None;
         }
-        let file_appender =
-            tracing_appender::rolling::never(log_dir, log_path.file_name().unwrap());
+        let file_appender = tracing_appender::rolling::never(log_dir, log_name);
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
         tracing_subscriber::registry()

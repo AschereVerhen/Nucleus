@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{prelude::*, signals::terminate};
 use nix::sys::signal::SIGKILL;
 use nix::unistd::Pid;
 use nuclconsts::units::{UnitBuilder, UserId};
@@ -150,6 +150,14 @@ pub fn execute_command(cmd: Commands) -> NuclResult<ResponseData> {
 
             UnitFS::write_unit(unit)?;
 
+            Ok(ResponseData::Empty)
+        }
+        Commands::Poweroff => {
+            terminate(nix::sys::reboot::RebootMode::RB_POWER_OFF)?;
+            Ok(ResponseData::Empty)
+        }
+        Commands::Reboot => {
+            terminate(nix::sys::reboot::RebootMode::RB_AUTOBOOT)?;
             Ok(ResponseData::Empty)
         }
     }

@@ -1,4 +1,4 @@
-use nix::unistd::Pid;
+use nix::unistd::{ForkResult, Pid};
 use nuclconsts::paths::SocketRegistry;
 use nucld::parse_input::execute_command;
 use nucld::prelude::*;
@@ -12,9 +12,27 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 #[instrument]
 fn main() -> NuclResult<()> {
-    nucld::initialization::prelude()?; //Basic initialization.
-    handle_signals()?; //Set up signal handling.
-
+    //Only do prelude IF AND ONLY IF our project is running as PID 1. Else, it is running as a
+    //supervisor, not an init manager.
+    let mut supervisor_mode = false;
+    if std::process::id() != 1 {
+        supervisor_mode = true;
+        if !is_root() {
+            panic!("Please run the supervisor as root"); //Since the init isnt PID 1, it might or
+            //might not have root privs. and we need root privs.
+        }
+        //And in this case, we can safely daemonize ourself.
+        let res = daemonize()?;
+        if res != 0 {
+            return Ok(());
+        }
+    }
+    let sigset = if !supervisor_mode {
+        nucld::initialization::prelude()?; //Basic initialization.
+        Some(handle_signals()?) //Set up signal handling.
+    } else {
+        None
+    };
     let socket_path = SocketRegistry::get_path_of(HelperBins::NuclD);
     let _log_guard = nucllib::logging::init_logger("nucld");
     info!("Initializing nucld daemon");
@@ -59,15 +77,32 @@ fn main() -> NuclResult<()> {
         }
     })?;
     loop {
-        if GOT_SIGCHLD.swap(false, Ordering::SeqCst) {
-            reap_children();
-        }
-        if GOT_TERMINATE.swap(false, Ordering::SeqCst) {
-            terminate(nix::sys::reboot::RebootMode::RB_POWER_OFF)?; //WARN: Hardcoded for now.
+        if let Some(sigset) = sigset {
+            sigset.wait()?;
+            if GOT_SIGCHLD.swap(false, Ordering::SeqCst) {
+                reap_children();
+            }
+            if GOT_TERMINATE.swap(false, Ordering::SeqCst) {
+                terminate(nix::sys::reboot::RebootMode::RB_POWER_OFF)?; //WARN: Hardcoded for now.
+            }
+        } else {
+            std::thread::park(); //prevent the main thread from dying.
         }
     }
 }
-
+fn daemonize() -> NuclResult<u32> {
+    let fork_res = unsafe { nix::unistd::fork()? };
+    match fork_res {
+        ForkResult::Child => {
+            nix::unistd::setsid()?;
+            Ok(0u32)
+        }
+        ForkResult::Parent { child } => {
+            let pid_child = child.as_raw();
+            Ok(pid_child as u32)
+        }
+    }
+}
 #[instrument(level = "debug")]
 fn reap_children() {
     use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};

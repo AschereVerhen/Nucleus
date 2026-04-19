@@ -1,5 +1,8 @@
 use crate::prelude::*;
-use nix::{sys::signal, unistd::Pid};
+use nix::{
+    sys::signal::{self, SigSet, pthread_sigmask},
+    unistd::Pid,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 use sysinfo::System;
 
@@ -18,7 +21,7 @@ extern "C" fn ignore_sigint(_: i32) {}
 
 extern "C" fn ignore_sigquit(_: i32) {}
 
-pub fn handle_signals() -> NuclResult<()> {
+pub fn handle_signals() -> NuclResult<SigSet> {
     //Handler for sigterm:
     unsafe { signal::signal(signal::SIGTERM, signal::SigHandler::Handler(handle_sigterm))? }; //Need
     //to pass a functional pointer-equivalent.
@@ -27,7 +30,13 @@ pub fn handle_signals() -> NuclResult<()> {
     //Ignore SIGINT and SIGQUIT
     unsafe { signal::signal(signal::SIGINT, signal::SigHandler::Handler(ignore_sigint))? };
     unsafe { signal::signal(signal::SIGQUIT, signal::SigHandler::Handler(ignore_sigquit))? };
-    Ok(())
+    let mut sigset = SigSet::empty();
+    sigset.add(signal::SIGTERM);
+    sigset.add(signal::SIGCHLD);
+
+    pthread_sigmask(signal::SigmaskHow::SIG_BLOCK, Some(&sigset), None)?;
+
+    Ok(sigset)
 }
 
 pub fn terminate(howto: nix::sys::reboot::RebootMode) -> NuclResult<()> {
